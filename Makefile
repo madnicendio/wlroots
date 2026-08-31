@@ -7,7 +7,7 @@ BUILD_DIR := $(ROOT_DIR)/build
 .PHONY: clean all run_compositor
 
 $(BUILD_DIR)/libwlroots-0.21.so:
-	meson setup build --prefix $(BUILD_DIR)
+	meson setup build --prefix $(INSTALL_DIR)
 	meson compile -C build
 
 $(INSTALL_DIR)/lib64/libwlroots-0.21.so: $(BUILD_DIR)/libwlroots-0.21.so
@@ -20,5 +20,6 @@ run_compositor: tinywl/tinywl
 	tinywl/tinywl
 
 clean:
-	rm -rf build
 	make -C tinywl INSTALL_DIR=$(INSTALL_DIR) clean
+	rm -rf install
+	rm -rf build
