@@ -86,6 +86,10 @@ static int handle_create_virtual_monitor(sd_bus_message *message,
 
 	// No-op: @options ("persistent", "name") are accepted but ignored.
 
+	// TODO: "name" is a human readable describing virtual the monitor.
+	// w0vncserver sends one, we should pass it on and set it with
+	// wlr_output_set_description().
+
 	struct wlr_remote_desktop_1_monitor *monitor =
 		create_remote_desktop_1_monitor(session);
 	if (monitor == NULL) {
