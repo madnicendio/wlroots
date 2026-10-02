@@ -4,8 +4,13 @@
 #include <wayland-server-core.h>
 #include <systemd/sd-bus.h>
 
+struct wlr_backend;
+struct wlr_output;
+
 struct wlr_remote_desktop_1 {
 	struct wl_event_loop *event_loop;
+	// The compositor's multi backend, virtual monitors are added to it
+	struct wlr_backend *backend;
 	struct wl_event_source *bus_event_source;
 	sd_bus *bus;
 
@@ -34,6 +39,13 @@ struct wlr_remote_desktop_1_monitor {
 	char *path;
 	sd_bus_slot *iface_slot;
 
+	// Each monitor owns a headless backend with a single output
+	// TODO: listen to backend->events.destroy, the compositor destroys it
+	// along with its multi backend if that happens before
+	// wlr_remote_desktop_1_destroy()
+	struct wlr_backend *backend;
+	struct wlr_output *output;
+
 	uint32_t stream_id_counter;
 };
 
@@ -44,8 +56,14 @@ struct wlr_remote_desktop_1_clipboard {
 	sd_bus_slot *iface_slot;
 };
 
+/**
+ * Create the RemoteDesktop1 D-Bus service. The backend must be a multi backend
+ * (such as the one returned by wlr_backend_autocreate()), virtual monitors
+ * are added to it as headless backends and show up through its new_output
+ * event.
+ */
 struct wlr_remote_desktop_1 *wlr_remote_desktop_1_create(
-	struct wl_display *display);
+	struct wl_display *display, struct wlr_backend *backend);
 
 void wlr_remote_desktop_1_destroy(struct wlr_remote_desktop_1 *rd1);
 

@@ -1063,7 +1063,7 @@ int main(int argc, char *argv[]) {
 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, (void *)NULL);
 		}
 	}
-	server.rd1 = wlr_remote_desktop_1_create(server.wl_display);
+	server.rd1 = wlr_remote_desktop_1_create(server.wl_display, server.backend);
 	/* Run the Wayland event loop. This does not return until you exit the
 	 * compositor. Starting the backend rigged up all of the necessary event
 	 * loop configuration to listen to libinput events, DRM events, generate

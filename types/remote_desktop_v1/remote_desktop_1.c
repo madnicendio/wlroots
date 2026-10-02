@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <types/wlr_remote_desktop_1.h>
+#include <wlr/backend/multi.h>
 #include <wlr/util/log.h>
 
 #define REMOTE_DESKTOP_1_VERSION 1
@@ -115,13 +116,19 @@ static int handle_bus_fd(int fd, uint32_t mask, void *data) {
 }
 
 struct wlr_remote_desktop_1 *wlr_remote_desktop_1_create(
-		struct wl_display *display) {
+		struct wl_display *display, struct wlr_backend *backend) {
+	if (!wlr_backend_is_multi(backend)) {
+		wlr_log(WLR_ERROR, "RemoteDesktop1 requires a multi backend");
+		return NULL;
+	}
+
 	struct wlr_remote_desktop_1 *rd1 = calloc(1, sizeof(*rd1));
 	if (rd1 == NULL) {
 		return NULL;
 	}
 
 	rd1->event_loop = wl_display_get_event_loop(display);
+	rd1->backend = backend;
 	wl_list_init(&rd1->sessions);
 
 	int result = sd_bus_open_user(&rd1->bus);

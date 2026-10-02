@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <types/wlr_remote_desktop_1.h>
+#include <wlr/backend.h>
+#include <wlr/backend/headless.h>
+#include <wlr/backend/multi.h>
+#include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
 
 #define REMOTE_DESKTOP_1_MONITOR_VERSION 1
@@ -133,8 +137,7 @@ struct wlr_remote_desktop_1_monitor *create_remote_desktop_1_monitor(
 	monitor->path = remote_desktop_1_format_path("%s/Monitor/%u",
 		session->path, id);
 	if (monitor->path == NULL) {
-		free(monitor);
-		return NULL;
+		goto error_monitor;
 	}
 
 	int result = sd_bus_add_object_vtable(session->manager->bus,
@@ -144,18 +147,55 @@ struct wlr_remote_desktop_1_monitor *create_remote_desktop_1_monitor(
 		wlr_log(WLR_ERROR,
 			"Failed to register RemoteDesktop1.Monitor object: %s",
 			strerror(-result));
-		free(monitor->path);
-		free(monitor);
-		return NULL;
+		goto error_path;
 	}
 
+	monitor->backend = wlr_headless_backend_create(session->manager->event_loop);
+	if (monitor->backend == NULL) {
+		wlr_log(WLR_ERROR, "Failed to create headless backend for monitor");
+		goto error_vtable;
+	}
+
+	// Add backend to the compositor's multi backend, so the output shows up
+	// through the compositor's regular new_output handler
+	if (!wlr_multi_backend_add(session->manager->backend, monitor->backend)) {
+		wlr_log(WLR_ERROR, "Failed to add headless backend for monitor");
+		goto error_backend;
+	}
+
+	if (!wlr_backend_start(monitor->backend)) {
+		wlr_log(WLR_ERROR, "Failed to start headless backend for monitor");
+		goto error_backend;
+	}
+
+	// TODO: the height and width are placeholder values, they should come
+	// from the client and be sent through the PipeWire-stream and not as
+	// an argument to CreateVirtualMonitor
+	monitor->output = wlr_headless_add_output(monitor->backend, 1280, 720);
+	if (monitor->output == NULL) {
+		wlr_log(WLR_ERROR, "Failed to create headless output for monitor");
+		goto error_backend;
+	}
+
+	// To clean up single monitors, or all of them when a session is ended
 	wl_list_insert(&session->monitors, &monitor->link);
 
-	// Notifies the session's ObjectManager (see session.c) that a new
-	// child object appeared.
+	// "Listing monitors is done via the org.freedesktop.DBus.ObjectManager
+	// interface implemented on the same path as the session." This notifies
+	// the session's ObjectManager that a new child object appeared.
 	sd_bus_emit_object_added(session->manager->bus, monitor->path);
 
 	return monitor;
+
+error_backend:
+	wlr_backend_destroy(monitor->backend);
+error_vtable:
+	sd_bus_slot_unref(monitor->iface_slot);
+error_path:
+	free(monitor->path);
+error_monitor:
+	free(monitor);
+	return NULL;
 }
 
 void destroy_remote_desktop_1_monitor(
@@ -165,6 +205,10 @@ void destroy_remote_desktop_1_monitor(
 	}
 
 	sd_bus_emit_object_removed(monitor->session->manager->bus, monitor->path);
+
+	// Destroys the output too, which the compositor sees through
+	// wlr_output.events.destroy.
+	wlr_backend_destroy(monitor->backend);
 
 	sd_bus_slot_unref(monitor->iface_slot);
 	wl_list_remove(&monitor->link);
