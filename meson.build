@@ -123,6 +123,9 @@ pixman = dependency('pixman-1',
 math = cc.find_library('m')
 rt = cc.find_library('rt')
 libsystemd = dependency('libsystemd')
+# pw_init()/pw_deinit() are reference counted since 0.3.49, each
+# pipewire_context relies on that
+libpipewire = dependency('libpipewire-0.3', version: '>=0.3.49')
 
 wlr_files = []
 wlr_deps = [
@@ -133,6 +136,7 @@ wlr_deps = [
 	math,
 	rt,
 	libsystemd,
+	libpipewire,
 ]
 
 subdir('protocol')

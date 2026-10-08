@@ -81,6 +81,7 @@ wlr_files += files(
 	'wlr_primary_selection.c',
 	'wlr_region.c',
 	'wlr_relative_pointer_v1.c',
+	'pipewire/context.c',
 	'remote_desktop_v1/clipboard.c',
 	'remote_desktop_v1/monitor.c',
 	'remote_desktop_v1/remote_desktop_1.c',
