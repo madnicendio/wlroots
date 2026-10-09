@@ -20,4 +20,19 @@ struct pipewire_context *create_pipewire_context(
 	struct wl_event_loop *event_loop);
 void destroy_pipewire_context(struct pipewire_context *pipewire);
 
+struct wlr_output;
+
+// A Video/Source node producing the content of a wlr_output. Owns its own
+// pipewire_context, so the PipeWire connection lives exactly as long as the
+// stream.
+struct pipewire_output_stream {
+	struct wlr_output *output;
+
+	struct pipewire_context *pipewire;
+};
+
+struct pipewire_output_stream *create_pipewire_output_stream(
+	struct wl_event_loop *event_loop, struct wlr_output *output);
+void destroy_pipewire_output_stream(struct pipewire_output_stream *stream);
+
 #endif  /* TYPES_PIPEWIRE_H */
