@@ -29,6 +29,8 @@ struct pipewire_output_stream {
 	struct wlr_output *output;
 
 	struct pipewire_context *pipewire;
+	struct pw_stream *stream;
+	struct spa_hook stream_listener;
 };
 
 struct pipewire_output_stream *create_pipewire_output_stream(
