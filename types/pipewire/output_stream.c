@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <spa/param/video/format-utils.h>
 #include <spa/utils/result.h>
 #include <types/pipewire.h>
 #include <wlr/types/wlr_output.h>
@@ -47,9 +48,31 @@ struct pipewire_output_stream *create_pipewire_output_stream(
 	pw_stream_add_listener(stream->stream, &stream->stream_listener,
 		&stream_events, stream);
 
-	// TODO: offer a format
+	uint8_t buffer[1024];
+	struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+
+	// BGRx has the same memory layout as DRM_FORMAT_XRGB8888, the headless
+	// backend's render format. The size is fixed to the output's for now, and
+	// a framerate of 0/1 means frames come whenever the output commits.
+	struct spa_video_info_raw info = SPA_VIDEO_INFO_RAW_INIT(
+		.format = SPA_VIDEO_FORMAT_BGRx,
+		.size = SPA_RECTANGLE(output->width, output->height),
+		.framerate = SPA_FRACTION(0, 1));
+	const struct spa_pod *params[1];
+	params[0] = spa_format_video_raw_build(&builder, SPA_PARAM_EnumFormat, &info);
+	if (params[0] == NULL) {
+		wlr_log(WLR_ERROR, "Failed to build PipeWire stream format");
+		goto error_pw_stream;
+	}
+
+	wlr_log(WLR_DEBUG, "Offering PipeWire stream format BGRx %dx%d for %s",
+		output->width, output->height, output->name);
+
+	// We drive the graph, since frames are produced when the output
+	// commits rather than when the consumer asks for them
 	int result = pw_stream_connect(stream->stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
-		PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, NULL, 0);
+		PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS,
+		params, 1);
 	if (result < 0) {
 		wlr_log(WLR_ERROR, "Failed to connect PipeWire stream: %s",
 			spa_strerror(result));
