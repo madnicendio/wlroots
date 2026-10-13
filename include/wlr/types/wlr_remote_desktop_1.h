@@ -46,6 +46,7 @@ struct wlr_remote_desktop_1_monitor {
 	struct wlr_backend *backend;
 	struct wlr_output *output;
 
+	struct wl_list streams; // wlr_remote_desktop_1_stream.link
 	uint32_t stream_id_counter;
 };
 

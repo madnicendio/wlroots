@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <types/pipewire.h>
 #include <types/wlr_remote_desktop_1.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -14,6 +15,15 @@
 // Cursor mode values from the RD1 draft. Only METADATA is advertised, and
 // it's the only mode OpenPipeWireStream below is aware of.
 #define REMOTE_DESKTOP_1_CURSOR_MODE_METADATA 3
+
+// A PipeWire stream opened with Monitor.OpenPipeWireStream. Not a D-Bus
+// object of its own, it's addressed by its id within the monitor.
+struct wlr_remote_desktop_1_stream {
+	struct wl_list link; // wlr_remote_desktop_1_monitor.streams
+
+	char *id;
+	struct pipewire_output_stream *pipewire;
+};
 
 static int handle_get_version(sd_bus *bus, const char *path,
 		const char *interface, const char *property, sd_bus_message *reply,
@@ -62,23 +72,62 @@ static int handle_remove(sd_bus_message *message, void *userdata,
 	return 0;
 }
 
+static void destroy_stream(struct wlr_remote_desktop_1_stream *stream) {
+	destroy_pipewire_output_stream(stream->pipewire);
+
+	wl_list_remove(&stream->link);
+	free(stream->id);
+	free(stream);
+}
+
+static struct wlr_remote_desktop_1_stream *create_stream(
+		struct wlr_remote_desktop_1_monitor *monitor) {
+	struct wlr_remote_desktop_1_stream *stream = calloc(1, sizeof(*stream));
+	if (stream == NULL) {
+		return NULL;
+	}
+
+	stream->id = remote_desktop_1_format_path("%u",
+		monitor->stream_id_counter++);
+	if (stream->id == NULL) {
+		free(stream);
+		return NULL;
+	}
+
+	// The PipeWire connection is opened here and lives as long as the stream
+	stream->pipewire = create_pipewire_output_stream(
+		monitor->session->manager->event_loop, monitor->output);
+	if (stream->pipewire == NULL) {
+		free(stream->id);
+		free(stream);
+		return NULL;
+	}
+
+	wl_list_insert(&monitor->streams, &stream->link);
+	return stream;
+}
+
 static int handle_open_pipewire_stream(sd_bus_message *message,
 		void *userdata, sd_bus_error *error) {
 	struct wlr_remote_desktop_1_monitor *monitor = userdata;
 
-	// No-op: @options ("cursor-mode") is accepted but ignored. There is no
-	// real PipeWire stream behind the returned id/info; node-id and serial
-	// are placeholder values.
-	char id[16];
-	snprintf(id, sizeof(id), "%u", monitor->stream_id_counter++);
+	// No-op: @options ("cursor-mode") is accepted but ignored.
 
+	struct wlr_remote_desktop_1_stream *stream = create_stream(monitor);
+	if (stream == NULL) {
+		return sd_bus_reply_method_errorf(message, SD_BUS_ERROR_FAILED,
+			"Failed to open PipeWire stream");
+	}
+
+	// TODO: node-id and serial are still placeholders, they're only known
+	// once PipeWire has created the node
 	sd_bus_message *reply = NULL;
 	int result = sd_bus_message_new_method_return(message, &reply);
 	if (result < 0) {
 		return result;
 	}
 
-	result = sd_bus_message_append(reply, "s", id);
+	result = sd_bus_message_append(reply, "s", stream->id);
 	if (result >= 0) {
 		result = sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{sv}");
 	}
@@ -101,9 +150,24 @@ static int handle_open_pipewire_stream(sd_bus_message *message,
 
 static int handle_close_pipewire_stream(sd_bus_message *message,
 		void *userdata, sd_bus_error *error) {
-	// No-op: the "id" argument is accepted but ignored, there is no stream
-	// to actually close.
-	return sd_bus_reply_method_return(message, "");
+	struct wlr_remote_desktop_1_monitor *monitor = userdata;
+
+	const char *id;
+	int result = sd_bus_message_read(message, "s", &id);
+	if (result < 0) {
+		return result;
+	}
+
+	struct wlr_remote_desktop_1_stream *stream;
+	wl_list_for_each(stream, &monitor->streams, link) {
+		if (strcmp(stream->id, id) == 0) {
+			destroy_stream(stream);
+			return sd_bus_reply_method_return(message, "");
+		}
+	}
+
+	return sd_bus_reply_method_errorf(message, SD_BUS_ERROR_INVALID_ARGS,
+		"No PipeWire stream with id \"%s\"", id);
 }
 
 static const sd_bus_vtable remote_desktop_1_monitor_vtable[] = {
@@ -132,6 +196,7 @@ struct wlr_remote_desktop_1_monitor *create_remote_desktop_1_monitor(
 	}
 
 	monitor->session = session;
+	wl_list_init(&monitor->streams);
 
 	uint32_t id = session->monitor_id_counter++;
 	monitor->path = remote_desktop_1_format_path("%s/Monitor/%u",
@@ -205,6 +270,12 @@ void destroy_remote_desktop_1_monitor(
 	}
 
 	sd_bus_emit_object_removed(monitor->session->manager->bus, monitor->path);
+
+	// Before the backend, since the streams use its output
+	struct wlr_remote_desktop_1_stream *stream, *tmp;
+	wl_list_for_each_safe(stream, tmp, &monitor->streams, link) {
+		destroy_stream(stream);
+	}
 
 	// Destroys the output too, which the compositor sees through
 	// wlr_output.events.destroy.
