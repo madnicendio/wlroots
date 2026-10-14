@@ -31,6 +31,18 @@ struct pipewire_output_stream {
 	struct pipewire_context *pipewire;
 	struct pw_stream *stream;
 	struct spa_hook stream_listener;
+
+	// Valid once the ready event has been emitted
+	uint32_t node_id;
+
+	struct {
+		// The node exists in the PipeWire graph and node_id is set.
+		// Emitted from a PipeWire callback, listeners must not destroy the
+		// stream.
+		struct wl_signal ready;
+	} events;
+
+	bool is_ready;
 };
 
 struct pipewire_output_stream *create_pipewire_output_stream(

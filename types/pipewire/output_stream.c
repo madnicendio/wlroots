@@ -7,8 +7,37 @@
 
 static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 		enum pw_stream_state state, const char *error) {
+	struct pipewire_output_stream *stream = data;
+
 	wlr_log(WLR_DEBUG, "PipeWire stream state %s -> %s",
 		pw_stream_state_as_string(old), pw_stream_state_as_string(state));
+
+	switch (state) {
+	case PW_STREAM_STATE_ERROR:
+		wlr_log(WLR_ERROR, "PipeWire stream error: %s", error);
+		break;
+	case PW_STREAM_STATE_PAUSED:
+		if (stream->is_ready) {
+			break;
+		}
+
+		// The first PAUSED is when the node has been created in the graph
+		stream->node_id = pw_stream_get_node_id(stream->stream);
+		if (stream->node_id == SPA_ID_INVALID) {
+			wlr_log(WLR_ERROR, "PipeWire stream has no node id");
+			break;
+		}
+
+		stream->is_ready = true;
+		wlr_log(WLR_DEBUG, "PipeWire stream ready: node id %u",
+			stream->node_id);
+		wl_signal_emit_mutable(&stream->events.ready, NULL);
+		break;
+	case PW_STREAM_STATE_UNCONNECTED:
+	case PW_STREAM_STATE_CONNECTING:
+	case PW_STREAM_STATE_STREAMING:
+		break;
+	}
 }
 
 static const struct pw_stream_events stream_events = {
@@ -24,6 +53,8 @@ struct pipewire_output_stream *create_pipewire_output_stream(
 	}
 
 	stream->output = output;
+	stream->node_id = SPA_ID_INVALID;
+	wl_signal_init(&stream->events.ready);
 
 	stream->pipewire = create_pipewire_context(event_loop);
 	if (stream->pipewire == NULL) {

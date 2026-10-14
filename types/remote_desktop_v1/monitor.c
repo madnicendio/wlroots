@@ -23,6 +23,11 @@ struct wlr_remote_desktop_1_stream {
 
 	char *id;
 	struct pipewire_output_stream *pipewire;
+
+	// The OpenPipeWireStream call, replied to once the node is ready
+	sd_bus_message *pending_open;
+
+	struct wl_listener pipewire_ready;
 };
 
 static int handle_get_version(sd_bus *bus, const char *path,
@@ -72,12 +77,59 @@ static int handle_remove(sd_bus_message *message, void *userdata,
 	return 0;
 }
 
+static void reply_open_pipewire_stream(
+		struct wlr_remote_desktop_1_stream *stream) {
+	sd_bus_message *reply = NULL;
+	int result = sd_bus_message_new_method_return(stream->pending_open, &reply);
+	if (result >= 0) {
+		result = sd_bus_message_append(reply, "s", stream->id);
+	}
+	if (result >= 0) {
+		result = sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{sv}");
+	}
+	if (result >= 0) {
+		result = sd_bus_message_append(reply, "{sv}", "node-id", "u",
+			stream->pipewire->node_id);
+	}
+	if (result >= 0) {
+		// TODO: the serial is still a placeholder
+		result = sd_bus_message_append(reply, "{sv}", "serial", "t", (uint64_t)0);
+	}
+	if (result >= 0) {
+		result = sd_bus_message_close_container(reply);
+	}
+	if (result >= 0) {
+		result = sd_bus_send(NULL, reply, NULL);
+	}
+	if (result < 0) {
+		wlr_log(WLR_ERROR, "Failed to reply to OpenPipeWireStream: %s",
+			strerror(-result));
+	}
+
+	sd_bus_message_unref(reply);
+	stream->pending_open = sd_bus_message_unref(stream->pending_open);
+}
+
 static void destroy_stream(struct wlr_remote_desktop_1_stream *stream) {
+	if (stream->pending_open != NULL) {
+		sd_bus_reply_method_errorf(stream->pending_open, SD_BUS_ERROR_FAILED,
+			"PipeWire stream was closed before it was ready");
+		sd_bus_message_unref(stream->pending_open);
+	}
+
+	wl_list_remove(&stream->pipewire_ready.link);
 	destroy_pipewire_output_stream(stream->pipewire);
 
 	wl_list_remove(&stream->link);
 	free(stream->id);
 	free(stream);
+}
+
+static void stream_handle_pipewire_ready(struct wl_listener *listener,
+		void *data) {
+	struct wlr_remote_desktop_1_stream *stream =
+		wl_container_of(listener, stream, pipewire_ready);
+	reply_open_pipewire_stream(stream);
 }
 
 static struct wlr_remote_desktop_1_stream *create_stream(
@@ -103,6 +155,9 @@ static struct wlr_remote_desktop_1_stream *create_stream(
 		return NULL;
 	}
 
+	stream->pipewire_ready.notify = stream_handle_pipewire_ready;
+	wl_signal_add(&stream->pipewire->events.ready, &stream->pipewire_ready);
+
 	wl_list_insert(&monitor->streams, &stream->link);
 	return stream;
 }
@@ -119,33 +174,10 @@ static int handle_open_pipewire_stream(sd_bus_message *message,
 			"Failed to open PipeWire stream");
 	}
 
-	// TODO: node-id and serial are still placeholders, they're only known
-	// once PipeWire has created the node
-	sd_bus_message *reply = NULL;
-	int result = sd_bus_message_new_method_return(message, &reply);
-	if (result < 0) {
-		return result;
-	}
-
-	result = sd_bus_message_append(reply, "s", stream->id);
-	if (result >= 0) {
-		result = sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{sv}");
-	}
-	if (result >= 0) {
-		result = sd_bus_message_append(reply, "{sv}", "node-id", "u", (uint32_t)0);
-	}
-	if (result >= 0) {
-		result = sd_bus_message_append(reply, "{sv}", "serial", "t", (uint64_t)0);
-	}
-	if (result >= 0) {
-		result = sd_bus_message_close_container(reply);
-	}
-	if (result >= 0) {
-		result = sd_bus_send(NULL, reply, NULL);
-	}
-
-	sd_bus_message_unref(reply);
-	return result;
+	// The node id and serial are only known once PipeWire has created the
+	// node, so the reply is sent from stream_handle_pipewire_ready()
+	stream->pending_open = sd_bus_message_ref(message);
+	return 1;
 }
 
 static int handle_close_pipewire_stream(sd_bus_message *message,
