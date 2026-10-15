@@ -92,8 +92,8 @@ static void reply_open_pipewire_stream(
 			stream->pipewire->node_id);
 	}
 	if (result >= 0) {
-		// TODO: the serial is still a placeholder
-		result = sd_bus_message_append(reply, "{sv}", "serial", "t", (uint64_t)0);
+		result = sd_bus_message_append(reply, "{sv}", "serial", "t",
+			stream->pipewire->serial);
 	}
 	if (result >= 0) {
 		result = sd_bus_message_close_container(reply);

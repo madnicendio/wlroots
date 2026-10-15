@@ -34,9 +34,10 @@ struct pipewire_output_stream {
 
 	// Valid once the ready event has been emitted
 	uint32_t node_id;
+	uint64_t serial;
 
 	struct {
-		// The node exists in the PipeWire graph and node_id is set.
+		// The node exists in the PipeWire graph and node_id/serial are set.
 		// Emitted from a PipeWire callback, listeners must not destroy the
 		// stream.
 		struct wl_signal ready;

@@ -1,9 +1,24 @@
+#include <inttypes.h>
 #include <stdlib.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/utils/result.h>
 #include <types/pipewire.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
+
+static bool read_serial(struct pipewire_output_stream *stream) {
+	// The stream's properties are updated with the ones of the bound node,
+	// which includes the serial, before it goes to PAUSED
+	const struct pw_properties *props = pw_stream_get_properties(stream->stream);
+	const char *serial = pw_properties_get(props, PW_KEY_OBJECT_SERIAL);
+	if (serial == NULL) {
+		return false;
+	}
+
+	char *end;
+	stream->serial = strtoull(serial, &end, 10);
+	return *serial != '\0' && *end == '\0';
+}
 
 static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 		enum pw_stream_state state, const char *error) {
@@ -23,14 +38,14 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 
 		// The first PAUSED is when the node has been created in the graph
 		stream->node_id = pw_stream_get_node_id(stream->stream);
-		if (stream->node_id == SPA_ID_INVALID) {
-			wlr_log(WLR_ERROR, "PipeWire stream has no node id");
+		if (stream->node_id == SPA_ID_INVALID || !read_serial(stream)) {
+			wlr_log(WLR_ERROR, "PipeWire stream has no node id or serial");
 			break;
 		}
 
 		stream->is_ready = true;
-		wlr_log(WLR_DEBUG, "PipeWire stream ready: node id %u",
-			stream->node_id);
+		wlr_log(WLR_DEBUG, "PipeWire stream ready: node id %u, serial %" PRIu64,
+			stream->node_id, stream->serial);
 		wl_signal_emit_mutable(&stream->events.ready, NULL);
 		break;
 	case PW_STREAM_STATE_UNCONNECTED:
