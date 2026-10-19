@@ -6,6 +6,26 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
 
+static void handle_closed_idle(void *data) {
+	struct pipewire_output_stream *stream = data;
+
+	// Idle sources are removed by the event loop once dispatched
+	stream->closed_idle = NULL;
+	wl_signal_emit_mutable(&stream->events.closed, NULL);
+}
+
+static void schedule_closed(struct pipewire_output_stream *stream) {
+	if (stream->closed_idle != NULL) {
+		return;
+	}
+
+	stream->closed_idle = wl_event_loop_add_idle(stream->event_loop,
+		handle_closed_idle, stream);
+	if (stream->closed_idle == NULL) {
+		wlr_log(WLR_ERROR, "Failed to schedule PipeWire stream close");
+	}
+}
+
 static bool read_serial(struct pipewire_output_stream *stream) {
 	// The stream's properties are updated with the ones of the bound node,
 	// which includes the serial, before it goes to PAUSED
@@ -30,6 +50,10 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 	switch (state) {
 	case PW_STREAM_STATE_ERROR:
 		wlr_log(WLR_ERROR, "PipeWire stream error: %s", error);
+		schedule_closed(stream);
+		break;
+	case PW_STREAM_STATE_UNCONNECTED:
+		schedule_closed(stream);
 		break;
 	case PW_STREAM_STATE_PAUSED:
 		if (stream->is_ready) {
@@ -40,6 +64,7 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 		stream->node_id = pw_stream_get_node_id(stream->stream);
 		if (stream->node_id == SPA_ID_INVALID || !read_serial(stream)) {
 			wlr_log(WLR_ERROR, "PipeWire stream has no node id or serial");
+			schedule_closed(stream);
 			break;
 		}
 
@@ -48,7 +73,6 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 			stream->node_id, stream->serial);
 		wl_signal_emit_mutable(&stream->events.ready, NULL);
 		break;
-	case PW_STREAM_STATE_UNCONNECTED:
 	case PW_STREAM_STATE_CONNECTING:
 	case PW_STREAM_STATE_STREAMING:
 		break;
@@ -68,8 +92,10 @@ struct pipewire_output_stream *create_pipewire_output_stream(
 	}
 
 	stream->output = output;
+	stream->event_loop = event_loop;
 	stream->node_id = SPA_ID_INVALID;
 	wl_signal_init(&stream->events.ready);
+	wl_signal_init(&stream->events.closed);
 
 	stream->pipewire = create_pipewire_context(event_loop);
 	if (stream->pipewire == NULL) {
@@ -140,6 +166,10 @@ error_stream:
 void destroy_pipewire_output_stream(struct pipewire_output_stream *stream) {
 	if (stream == NULL) {
 		return;
+	}
+
+	if (stream->closed_idle != NULL) {
+		wl_event_source_remove(stream->closed_idle);
 	}
 
 	spa_hook_remove(&stream->stream_listener);

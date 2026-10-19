@@ -28,6 +28,7 @@ struct wlr_remote_desktop_1_stream {
 	sd_bus_message *pending_open;
 
 	struct wl_listener pipewire_ready;
+	struct wl_listener pipewire_closed;
 };
 
 static int handle_get_version(sd_bus *bus, const char *path,
@@ -118,6 +119,7 @@ static void destroy_stream(struct wlr_remote_desktop_1_stream *stream) {
 	}
 
 	wl_list_remove(&stream->pipewire_ready.link);
+	wl_list_remove(&stream->pipewire_closed.link);
 	destroy_pipewire_output_stream(stream->pipewire);
 
 	wl_list_remove(&stream->link);
@@ -130,6 +132,15 @@ static void stream_handle_pipewire_ready(struct wl_listener *listener,
 	struct wlr_remote_desktop_1_stream *stream =
 		wl_container_of(listener, stream, pipewire_ready);
 	reply_open_pipewire_stream(stream);
+}
+
+static void stream_handle_pipewire_closed(struct wl_listener *listener,
+		void *data) {
+	struct wlr_remote_desktop_1_stream *stream =
+		wl_container_of(listener, stream, pipewire_closed);
+	// TODO: the spec has no signal for telling the client that a stream
+	// went away, it only finds out from PipeWire
+	destroy_stream(stream);
 }
 
 static struct wlr_remote_desktop_1_stream *create_stream(
@@ -157,6 +168,8 @@ static struct wlr_remote_desktop_1_stream *create_stream(
 
 	stream->pipewire_ready.notify = stream_handle_pipewire_ready;
 	wl_signal_add(&stream->pipewire->events.ready, &stream->pipewire_ready);
+	stream->pipewire_closed.notify = stream_handle_pipewire_closed;
+	wl_signal_add(&stream->pipewire->events.closed, &stream->pipewire_closed);
 
 	wl_list_insert(&monitor->streams, &stream->link);
 	return stream;

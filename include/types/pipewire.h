@@ -41,9 +41,16 @@ struct pipewire_output_stream {
 		// Emitted from a PipeWire callback, listeners must not destroy the
 		// stream.
 		struct wl_signal ready;
+		// The stream failed or was disconnected and can't be used anymore,
+		// the listener is expected to destroy it
+		struct wl_signal closed;
 	} events;
 
+	struct wl_event_loop *event_loop;
 	bool is_ready;
+	// Defers emitting closed out of PipeWire callbacks, so listeners can
+	// destroy the stream right away
+	struct wl_event_source *closed_idle;
 };
 
 struct pipewire_output_stream *create_pipewire_output_stream(
