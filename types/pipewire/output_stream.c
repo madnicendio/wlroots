@@ -5,6 +5,7 @@
 #include <spa/param/video/format-utils.h>
 #include <spa/utils/result.h>
 #include <types/pipewire.h>
+#include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
@@ -134,6 +135,10 @@ static void start_streaming(struct pipewire_output_stream *stream) {
 
 	stream->output_commit.notify = handle_output_commit;
 	wl_signal_add(&stream->output->events.commit, &stream->output_commit);
+
+	// The consumer has nothing yet, and the compositor only commits when
+	// something changed, so ask for a frame
+	wlr_output_update_needs_frame(stream->output);
 }
 
 static void stop_streaming(struct pipewire_output_stream *stream) {
