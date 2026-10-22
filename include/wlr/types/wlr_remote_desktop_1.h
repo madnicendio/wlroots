@@ -11,50 +11,61 @@ struct wlr_remote_desktop_1 {
 	struct wl_event_loop *event_loop;
 	// The compositor's multi backend, virtual monitors are added to it
 	struct wlr_backend *backend;
-	struct wl_event_source *bus_event_source;
-	sd_bus *bus;
 
 	struct wl_list sessions; // wlr_remote_desktop_1_session.link
-	uint32_t session_id_counter;
+
+	struct {
+		struct wl_event_source *bus_event_source;
+		sd_bus *bus;
+
+		uint32_t session_id_counter;
+	} WLR_PRIVATE;
 };
 
 struct wlr_remote_desktop_1_session {
 	struct wlr_remote_desktop_1 *manager;
 	struct wl_list link; // wlr_remote_desktop_1.sessions
 
-	char *path;
-	sd_bus_slot *iface_slot;
-	sd_bus_slot *object_manager_slot;
-
 	struct wl_list monitors; // wlr_remote_desktop_1_monitor.link
 	struct wlr_remote_desktop_1_clipboard *clipboard;
 
-	uint32_t monitor_id_counter;
+	struct {
+		char *path;
+		sd_bus_slot *iface_slot;
+		sd_bus_slot *object_manager_slot;
+
+		uint32_t monitor_id_counter;
+	} WLR_PRIVATE;
 };
 
 struct wlr_remote_desktop_1_monitor {
 	struct wlr_remote_desktop_1_session *session;
 	struct wl_list link; // wlr_remote_desktop_1_session.monitors
 
-	char *path;
-	sd_bus_slot *iface_slot;
-
-	// Each monitor owns a headless backend with a single output
-	// TODO: listen to backend->events.destroy, the compositor destroys it
-	// along with its multi backend if that happens before
-	// wlr_remote_desktop_1_destroy()
-	struct wlr_backend *backend;
 	struct wlr_output *output;
 
-	struct wl_list streams; // wlr_remote_desktop_1_stream.link
-	uint32_t stream_id_counter;
+	struct {
+		char *path;
+		sd_bus_slot *iface_slot;
+
+		// Each monitor owns a headless backend with a single output
+		// TODO: listen to backend->events.destroy, the compositor destroys it
+		// along with its multi backend if that happens before
+		// wlr_remote_desktop_1_destroy()
+		struct wlr_backend *backend;
+
+		struct wl_list streams; // wlr_remote_desktop_1_stream.link
+		uint32_t stream_id_counter;
+	} WLR_PRIVATE;
 };
 
 struct wlr_remote_desktop_1_clipboard {
 	struct wlr_remote_desktop_1_session *session;
 
-	char *path;
-	sd_bus_slot *iface_slot;
+	struct {
+		char *path;
+		sd_bus_slot *iface_slot;
+	} WLR_PRIVATE;
 };
 
 /**
