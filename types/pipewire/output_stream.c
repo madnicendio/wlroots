@@ -119,8 +119,10 @@ static void handle_output_commit(struct wl_listener *listener, void *data) {
 	spa_data->chunk->stride = stream->stride;
 	spa_data->chunk->flags = 0;
 
-	// We're the driver, queueing the buffer is what makes the graph run
 	pw_stream_queue_buffer(stream->stream, pw_buffer);
+	// We're the driver, so the graph only runs, and hands the queued buffer
+	// to the consumer, when we trigger it
+	pw_stream_trigger_process(stream->stream);
 }
 
 static void start_streaming(struct pipewire_output_stream *stream) {
