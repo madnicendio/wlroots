@@ -1,9 +1,11 @@
+#include <drm_fourcc.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/utils/result.h>
 #include <types/pipewire.h>
+#include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
 
@@ -41,6 +43,85 @@ static bool read_serial(struct pipewire_output_stream *stream) {
 	return *serial != '\0' && *end == '\0';
 }
 
+static bool copy_output_buffer(struct pipewire_output_stream *stream,
+		struct wlr_buffer *src, void *dst) {
+	struct wlr_texture *texture =
+		wlr_texture_from_buffer(stream->output->renderer, src);
+	if (texture == NULL) {
+		return false;
+	}
+
+	// TODO: only copy the damaged region. That requires tracking the damage
+	// since each buffer in the pool was last filled, not since the last
+	// frame.
+	bool ok = wlr_texture_read_pixels(texture,
+		&(struct wlr_texture_read_pixels_options){
+			.data = dst,
+			.format = DRM_FORMAT_XRGB8888,
+			.stride = stream->stride,
+		});
+
+	wlr_texture_destroy(texture);
+	return ok;
+}
+
+static void queue_corrupted_buffer(struct pipewire_output_stream *stream,
+		struct pw_buffer *pw_buffer) {
+	struct spa_chunk *chunk = pw_buffer->buffer->datas[0].chunk;
+	chunk->size = 0;
+	chunk->flags = SPA_CHUNK_FLAG_CORRUPTED;
+	pw_stream_queue_buffer(stream->stream, pw_buffer);
+}
+
+static void handle_output_commit(struct wl_listener *listener, void *data) {
+	struct pipewire_output_stream *stream =
+		wl_container_of(listener, stream, output_commit);
+	struct wlr_output_event_commit *event = data;
+	const struct wlr_output_state *state = event->state;
+
+	if (!(state->committed & WLR_OUTPUT_STATE_BUFFER)) {
+		return;
+	}
+	struct wlr_buffer *src = state->buffer;
+
+	if ((uint32_t)src->width != stream->width ||
+			(uint32_t)src->height != stream->height) {
+		// TODO: renegotiate the size with the consumer
+		wlr_log(WLR_DEBUG, "Output is %dx%d but stream is %ux%u, skipping frame",
+			src->width, src->height, stream->width, stream->height);
+		return;
+	}
+
+	struct pw_buffer *pw_buffer = pw_stream_dequeue_buffer(stream->stream);
+	if (pw_buffer == NULL) {
+		// The consumer still holds every buffer
+		return;
+	}
+
+	struct spa_buffer *buffer = pw_buffer->buffer;
+	struct spa_data *spa_data = &buffer->datas[0];
+	uint32_t size = stream->stride * stream->height;
+	if (spa_data->data == NULL || spa_data->maxsize < size) {
+		wlr_log(WLR_ERROR, "PipeWire buffer is unmapped or too small");
+		queue_corrupted_buffer(stream, pw_buffer);
+		return;
+	}
+
+	if (!copy_output_buffer(stream, src, spa_data->data)) {
+		wlr_log(WLR_ERROR, "Failed to copy output buffer to PipeWire buffer");
+		queue_corrupted_buffer(stream, pw_buffer);
+		return;
+	}
+
+	spa_data->chunk->offset = 0;
+	spa_data->chunk->size = size;
+	spa_data->chunk->stride = stream->stride;
+	spa_data->chunk->flags = 0;
+
+	// We're the driver, queueing the buffer is what makes the graph run
+	pw_stream_queue_buffer(stream->stream, pw_buffer);
+}
+
 static void start_streaming(struct pipewire_output_stream *stream) {
 	if (stream->is_streaming) {
 		return;
@@ -50,6 +131,9 @@ static void start_streaming(struct pipewire_output_stream *stream) {
 	// Makes sure every frame is rendered into a buffer we can read, rather
 	// than a client buffer being scanned out directly
 	wlr_output_lock_attach_render(stream->output, true);
+
+	stream->output_commit.notify = handle_output_commit;
+	wl_signal_add(&stream->output->events.commit, &stream->output_commit);
 }
 
 static void stop_streaming(struct pipewire_output_stream *stream) {
@@ -58,6 +142,7 @@ static void stop_streaming(struct pipewire_output_stream *stream) {
 	}
 	stream->is_streaming = false;
 
+	wl_list_remove(&stream->output_commit.link);
 	wlr_output_lock_attach_render(stream->output, false);
 }
 

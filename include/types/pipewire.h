@@ -54,6 +54,7 @@ struct pipewire_output_stream {
 
 	// Frames are only produced while the consumer is streaming
 	bool is_streaming;
+	struct wl_listener output_commit;
 	// Defers emitting closed out of PipeWire callbacks, so listeners can
 	// destroy the stream right away
 	struct wl_event_source *closed_idle;
