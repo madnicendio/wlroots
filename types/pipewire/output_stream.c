@@ -41,6 +41,26 @@ static bool read_serial(struct pipewire_output_stream *stream) {
 	return *serial != '\0' && *end == '\0';
 }
 
+static void start_streaming(struct pipewire_output_stream *stream) {
+	if (stream->is_streaming) {
+		return;
+	}
+	stream->is_streaming = true;
+
+	// Makes sure every frame is rendered into a buffer we can read, rather
+	// than a client buffer being scanned out directly
+	wlr_output_lock_attach_render(stream->output, true);
+}
+
+static void stop_streaming(struct pipewire_output_stream *stream) {
+	if (!stream->is_streaming) {
+		return;
+	}
+	stream->is_streaming = false;
+
+	wlr_output_lock_attach_render(stream->output, false);
+}
+
 static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 		enum pw_stream_state state, const char *error) {
 	struct pipewire_output_stream *stream = data;
@@ -51,13 +71,17 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 	switch (state) {
 	case PW_STREAM_STATE_ERROR:
 		wlr_log(WLR_ERROR, "PipeWire stream error: %s", error);
+		stop_streaming(stream);
 		schedule_closed(stream);
 		break;
 	case PW_STREAM_STATE_UNCONNECTED:
+		stop_streaming(stream);
 		schedule_closed(stream);
 		break;
 	case PW_STREAM_STATE_PAUSED:
 		if (stream->is_ready) {
+			// The consumer stopped or disconnected
+			stop_streaming(stream);
 			break;
 		}
 
@@ -74,8 +98,10 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 			stream->node_id, stream->serial);
 		wl_signal_emit_mutable(&stream->events.ready, NULL);
 		break;
-	case PW_STREAM_STATE_CONNECTING:
 	case PW_STREAM_STATE_STREAMING:
+		start_streaming(stream);
+		break;
+	case PW_STREAM_STATE_CONNECTING:
 		break;
 	}
 }
@@ -210,6 +236,8 @@ void destroy_pipewire_output_stream(struct pipewire_output_stream *stream) {
 	if (stream->closed_idle != NULL) {
 		wl_event_source_remove(stream->closed_idle);
 	}
+
+	stop_streaming(stream);
 
 	spa_hook_remove(&stream->stream_listener);
 	pw_stream_destroy(stream->stream);
