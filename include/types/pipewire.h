@@ -48,6 +48,9 @@ struct pipewire_output_stream {
 
 	struct wl_event_loop *event_loop;
 	bool is_ready;
+
+	// Negotiated with the consumer, set once the Format param is known
+	uint32_t width, height, stride;
 	// Defers emitting closed out of PipeWire callbacks, so listeners can
 	// destroy the stream right away
 	struct wl_event_source *closed_idle;

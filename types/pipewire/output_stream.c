@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <spa/param/video/format-utils.h>
@@ -79,9 +80,47 @@ static void handle_stream_state_changed(void *data, enum pw_stream_state old,
 	}
 }
 
+static void handle_stream_param_changed(void *data, uint32_t id,
+		const struct spa_pod *param) {
+	struct pipewire_output_stream *stream = data;
+
+	if (id != SPA_PARAM_Format || param == NULL) {
+		return;
+	}
+
+	struct spa_video_info_raw info = {0};
+	if (spa_format_video_raw_parse(param, &info) < 0) {
+		pw_stream_set_error(stream->stream, -EINVAL, "Invalid video format");
+		return;
+	}
+
+	// BGRx is the only format offered, 4 bytes per pixel with no padding
+	stream->width = info.size.width;
+	stream->height = info.size.height;
+	stream->stride = stream->width * 4;
+	wlr_log(WLR_DEBUG, "PipeWire stream format negotiated: %ux%u",
+		stream->width, stream->height);
+
+	uint8_t buffer[1024];
+	struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+	// Shared memory only for now, PipeWire allocates the memfds since the
+	// stream isn't created with PW_STREAM_FLAG_ALLOC_BUFFERS
+	const struct spa_pod *params[1];
+	params[0] = spa_pod_builder_add_object(&builder,
+		SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+		SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(4, 2, 8),
+		SPA_PARAM_BUFFERS_blocks, SPA_POD_Int(1),
+		SPA_PARAM_BUFFERS_size, SPA_POD_Int(stream->stride * stream->height),
+		SPA_PARAM_BUFFERS_stride, SPA_POD_Int(stream->stride),
+		SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(1 << SPA_DATA_MemFd));
+
+	pw_stream_update_params(stream->stream, params, 1);
+}
+
 static const struct pw_stream_events stream_events = {
 	PW_VERSION_STREAM_EVENTS,
 	.state_changed = handle_stream_state_changed,
+	.param_changed = handle_stream_param_changed,
 };
 
 struct pipewire_output_stream *create_pipewire_output_stream(
