@@ -1,3 +1,68 @@
+# RemoteDesktop1 prototype
+
+This branch is a prototype of the `org.freedesktop.RemoteDesktop1` D-Bus API
+proposed in [xdg-specs!115], implemented inside wlroots and used from tinywl.
+
+We're aware that wlroots doesn't do D-Bus and doesn't depend on systemd, and
+this prototype does both (it uses sd-bus from libsystemd). That's why it's a
+prototype: putting everything in one place was the quickest way to learn the
+spec, find gaps in it, and get pixels to a real consumer ([w0vncserver] in
+headless mode). We'd like to find a shape for this that fits wlroots.
+
+All commits are prefixed with `TEMP:` because they are work in progress.
+
+## Status
+
+Working:
+
+- `CreateSession` and `CreateVirtualMonitor`, which adds a headless output
+- `OpenPipeWireStream` / `ClosePipeWireStream`: a `Video/Source` stream in
+  BGRx, using MemFd buffers, with frames read back from the output on commit
+
+Stubbed or missing:
+
+- `ConnectToEIS` (no input yet)
+- Clipboard
+- Session and monitor options are ignored
+- The stream size is fixed, and resizing the monitor isn't supported
+- No cursor metadata, no damage or header metadata, no DMA-BUF
+
+## Running
+
+```sh
+make tinywl/tinywl       # first time: builds wlroots into ./install and builds tinywl
+meson compile -C build   # after changing wlroots
+
+cd tinywl
+LD_LIBRARY_PATH=../build ./tinywl -s foot
+```
+
+The module registers `org.freedesktop.RemoteDesktop1` on the session bus.
+Then start w0vncserver in headless mode against tinywl's display and
+connect with a VNC client:
+
+```sh
+WAYLAND_DISPLAY=wayland-1 w0vncserver --headless --securitytypes=none
+```
+
+w0vncserver currently expects header and damage metadata on the stream and
+needs a small patch to accept frames without them. The
+`madni/remote-desktop1-yolo` branch offers both metadata types and works
+with an unpatched w0vncserver.
+
+## Things learned about the spec
+
+- `OpenPipeWireStream` doesn't say which formats, buffer types or metadata
+  a producer must offer, so producers and consumers can disagree on them
+  (for example the header metadata above).
+- Persistent virtual monitors don't map onto outputs whose lifetime is tied
+  to a client, like the proposed ext-transient-output protocol.
+
+[xdg-specs!115]: https://gitlab.freedesktop.org/xdg/xdg-specs/-/merge_requests/115
+[w0vncserver]: https://github.com/TigerVNC/tigervnc
+
+---
+
 # wlroots
 
 Pluggable, composable, unopinionated modules for building a [Wayland]
